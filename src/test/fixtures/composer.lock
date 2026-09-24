@@ -1,0 +1,10 @@
+{
+  "_readme": ["Fixture: guzzle 6.5.0 and symfony/http-kernel 4.4.0 both carry advisories."],
+  "content-hash": "0000000000000000000000000000000000",
+  "packages": [
+    { "name": "guzzlehttp/guzzle", "version": "6.5.0" },
+    { "name": "symfony/http-kernel", "version": "4.4.0" },
+    { "name": "monolog/monolog", "version": "2.0.0" }
+  ],
+  "packages-dev": []
+}

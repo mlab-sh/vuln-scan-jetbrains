@@ -1,0 +1,16 @@
+<html>
+<body>
+Reports dependencies with known vulnerabilities in a lockfile, from its last mlab scan.
+<p>
+One problem is reported per advisory, on the line that declares the package. Critical and high findings are errors,
+medium findings warnings and low or unrated findings weak warnings; anything below the severity floor set in
+<b>Settings | Tools | mlab</b> is reported as a weak warning.
+</p>
+<p>
+This inspection only reads results already stored on your machine. It never uploads anything: scans are started
+with <b>Check for Lock Vulnerabilities</b> or, once you have agreed, automatically when a lockfile changes.
+</p>
+<p>Supported lockfiles: Cargo.lock, package-lock.json, npm-shrinkwrap.json, composer.lock, Gemfile.lock, go.sum,
+requirements.txt, mise.lock.</p>
+</body>
+</html>

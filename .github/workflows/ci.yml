@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test buildPlugin
+      # Marketplace compliance: descriptor checks, then binary compatibility
+      # against every released IDE line since sinceBuild.
+      - run: ./gradlew verifyPluginProjectConfiguration verifyPluginStructure verifyPlugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: build/distributions/*.zip

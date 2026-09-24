@@ -1,0 +1,2 @@
+This file exists so you can confirm the "Check for lock vulnerabilities" menu
+entry does NOT appear when right-clicking a non-lockfile.

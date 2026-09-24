@@ -1,0 +1,17 @@
+{
+  "name": "shrinkwrap-demo",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": { "name": "shrinkwrap-demo", "version": "1.0.0" },
+    "node_modules/minimist": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.0.tgz"
+    },
+    "node_modules/handlebars": {
+      "version": "4.0.5",
+      "resolved": "https://registry.npmjs.org/handlebars/-/handlebars-4.0.5.tgz"
+    }
+  }
+}

@@ -1,0 +1,3 @@
+Inter (c) The Inter Project Authors and JetBrains Mono (c) The JetBrains Mono
+Project Authors, both under the SIL Open Font License 1.1
+(https://openfontlicense.org). Latin subsets, the same files vuln.mlab.sh serves.

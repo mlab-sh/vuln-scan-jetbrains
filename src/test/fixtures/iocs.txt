@@ -1,0 +1,33 @@
+Indicator samples for the selection-analysis work. Everything here is either a
+well known public resolver, a reserved/documentation value, or synthetic. None
+of it is a live malicious indicator.
+
+# Domains
+example.com
+vuln.mlab.sh
+sn0walice.dev
+xn--80ak6aa92e.com          punycode form, renders as a homograph of "apple.com"
+
+# IP addresses
+8.8.8.8                     Google public DNS, has geo and ASN data
+1.1.1.1                     Cloudflare
+192.168.1.1                 RFC1918, must be recognised as private
+2606:4700:4700::1111        IPv6
+203.0.113.0/24              TEST-NET-3, a CIDR range
+
+# URLs
+https://registry.npmjs.org/lodash/-/lodash-4.17.11.tgz    clean, no findings
+http://localhost:3000/api/health                          noisy but harmless
+http://admin:hunter2@192.168.99.7:8080/update.exe?next=https%3A%2F%2Fbit.ly%2F3xYz
+
+# Hashes
+d41d8cd98f00b204e9800998ecf8427e                                  MD5 of empty
+da39a3ee5e6b4b0d3255bfef95601890afd80709                          SHA1 of empty
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  SHA256 of empty
+
+# Email addresses
+security@example.com
+throwaway@mailinator.com    disposable provider
+
+# MAC
+00:1A:2B:3C:4D:5E

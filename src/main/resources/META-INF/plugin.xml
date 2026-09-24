@@ -1,0 +1,110 @@
+<idea-plugin>
+    <id>sh.mlab.vulnscan</id>
+    <name>mlab security</name>
+    <vendor url="https://mlab.sh">mlab</vendor>
+
+    <description><![CDATA[
+<p>CVE scanning for your lockfiles, powered by <a href="https://vuln.mlab.sh">mlab</a>. Right-click a lockfile,
+get its known vulnerabilities with exploitation intelligence, and see them in the Problems view.</p>
+
+<h3>Features</h3>
+<ul>
+  <li><b>Check for Lock Vulnerabilities</b> on any supported lockfile, from the Project view, the editor or the
+      <b>Tools | mlab</b> menu, or scan every lockfile in the project at once.</li>
+  <li>A report tab with a per-severity verdict, CVSS, <b>EPSS</b> and <b>CISA / EU known-exploited</b> status for
+      every advisory, sorted by real exploitation before CVSS band.</li>
+  <li>An <b>mlab</b> tool window listing findings by lockfile and severity, and vulnerable lockfiles colored in the
+      Project view by their worst severity.</li>
+  <li>An inspection reporting each advisory on the line that declares the package.</li>
+  <li>Quick documentation on any <b>CVE identifier</b>, in any file: CVSS, EPSS, known-exploited status, weaknesses.</li>
+  <li><b>Analyze Selection</b>: look up a selected URL, IP, email, file hash, MAC address or domain.</li>
+  <li>Automatic rescans when a lockfile changes, cached per content so an unchanged file is never re-uploaded.</li>
+</ul>
+<p>Supported lockfiles: Cargo.lock, package-lock.json, npm-shrinkwrap.json, composer.lock, Gemfile.lock, go.sum,
+requirements.txt, mise.lock.</p>
+
+<h3>Data and privacy</h3>
+<ul>
+  <li><b>Nothing is uploaded until you agree.</b> The first scan asks for consent. Opening a project makes no
+      network call.</li>
+  <li>A scan uploads <b>only the lockfile</b> you scan to vuln.mlab.sh (or your self-hosted endpoint), never your
+      source code.</li>
+  <li>CVE details send only the CVE identifier. Analyze Selection sends only the selected value, to the mlab
+      platform endpoint for its type. A domain lookup is the one kind that contacts the target.</li>
+  <li>API credentials are kept in the IDE password safe only. No telemetry is collected.</li>
+  <li>Scanning and lookups are disabled in untrusted projects.</li>
+</ul>
+<p>Anonymous scans are limited to 8 per hour; a free token from vuln.mlab.sh raises this to 25.</p>
+]]></description>
+
+    <change-notes><![CDATA[
+<p><b>1.1.0</b>: first release for JetBrains IDEs, at parity with the VS Code extension 1.1.0: lockfile scans with
+consent, content cache and auto rescans, exploitation intelligence, report tab, findings tool window, Project view
+colors, inspection, CVE quick documentation, Analyze Selection, and <code>.mlab/config.json</code> layered settings.</p>
+]]></change-notes>
+
+    <!-- Platform only: works in every IntelliJ based IDE. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="mlab" displayType="BALLOON"/>
+
+        <postStartupActivity implementation="sh.mlab.vulnscan.MlabStartup"/>
+
+        <toolWindow id="mlab" anchor="right" icon="/icons/mlab13.svg" doNotActivateOnStart="true"
+                    factoryClass="sh.mlab.vulnscan.FindingsToolWindowFactory"/>
+
+        <fileEditorProvider implementation="sh.mlab.vulnscan.MlabHtmlEditorProvider"/>
+        <editorTabTitleProvider implementation="sh.mlab.vulnscan.MlabHtmlTabTitleProvider"/>
+
+        <localInspection shortName="MlabVulnerableDependency" displayName="Vulnerable dependency (mlab)"
+                         groupName="mlab" enabledByDefault="true" level="WARNING"
+                         implementationClass="sh.mlab.vulnscan.VulnerableDependencyInspection"/>
+
+        <projectViewNodeDecorator implementation="sh.mlab.vulnscan.LockfileDecorator"/>
+
+        <documentationProvider implementation="sh.mlab.vulnscan.CveDocumentationProvider"/>
+
+        <projectConfigurable parentId="tools" id="sh.mlab.vulnscan.settings" displayName="mlab"
+                             instance="sh.mlab.vulnscan.MlabConfigurable"/>
+    </extensions>
+
+    <projectListeners>
+        <listener class="sh.mlab.vulnscan.LockfileChangeListener"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+    </projectListeners>
+
+    <actions>
+        <action id="sh.mlab.vulnscan.CheckLockfile" class="sh.mlab.vulnscan.CheckLockfileAction" icon="/icons/mlab.svg"
+                text="Check for Lock Vulnerabilities" description="Upload this lockfile to mlab and report its known CVEs">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="sh.mlab.vulnscan.ShowReport" class="sh.mlab.vulnscan.ShowReportAction" icon="/icons/mlab.svg"
+                text="See Vuln Report" description="Open the last mlab result for this lockfile, from the cache">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="sh.mlab.vulnscan.AnalyzeSelection" class="sh.mlab.vulnscan.AnalyzeSelectionAction" icon="/icons/mlab.svg"
+                text="Analyze Selection with mlab" description="Look up the selected URL, IP, email, hash, MAC address or domain">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+
+        <group id="sh.mlab.vulnscan.ToolsMenu" text="mlab" popup="true" icon="/icons/mlab.svg">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="sh.mlab.vulnscan.ScanWorkspace" class="sh.mlab.vulnscan.ScanWorkspaceAction"
+                    text="Scan All Lockfiles in Project" description="Scan every supported lockfile, cached ones for free"
+                    icon="AllIcons.Actions.Execute"/>
+            <action id="sh.mlab.vulnscan.Rescan" class="sh.mlab.vulnscan.RescanAction"
+                    text="Rescan" description="Rescan every lockfile listed in the mlab tool window"
+                    icon="AllIcons.Actions.Refresh"/>
+            <action id="sh.mlab.vulnscan.ClearResults" class="sh.mlab.vulnscan.ClearResultsAction"
+                    text="Clear Results" description="Forget every stored mlab result"
+                    icon="AllIcons.Actions.GC"/>
+            <separator/>
+            <action id="sh.mlab.vulnscan.OpenSettings" class="sh.mlab.vulnscan.OpenSettingsAction"
+                    text="Settings, Token and Quota…" description="Open the mlab settings page"
+                    icon="AllIcons.General.Settings"/>
+        </group>
+    </actions>
+</idea-plugin>

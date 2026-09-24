@@ -1,0 +1,9 @@
+# mise pins dev tools. Only registry-backed tools map onto an OSV ecosystem;
+# core tools like node are counted as skipped by the server. Verified against
+# the live API: this file resolves to 1 package with 7 advisories.
+[[tools.lodash]]
+backend = "npm:lodash"
+version = "4.17.11"
+
+[[tools.node]]
+version = "18.0.0"

@@ -1,0 +1,8 @@
+# Fixture with a known-vulnerable crate (time 0.1.44 → RUSTSEC-2020-0071 / CVE-2020-26235).
+[[package]]
+name = "time"
+version = "0.1.43"
+
+[[package]]
+name = "serde"
+version = "1.0.100"
