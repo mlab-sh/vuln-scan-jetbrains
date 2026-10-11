@@ -1,0 +1,7 @@
+{
+    "_meta": {"hash": {"sha256": "0"}, "pipfile-spec": 6, "requires": {}, "sources": []},
+    "default": {
+        "pyyaml": {"hashes": [], "version": "==5.3"}
+    },
+    "develop": {}
+}

@@ -20,8 +20,10 @@ get its known vulnerabilities with exploitation intelligence, and see them in th
   <li><b>Analyze Selection</b>: look up a selected URL, IP, email, file hash, MAC address or domain.</li>
   <li>Automatic rescans when a lockfile changes, cached per content so an unchanged file is never re-uploaded.</li>
 </ul>
-<p>Supported lockfiles: Cargo.lock, package-lock.json, npm-shrinkwrap.json, composer.lock, Gemfile.lock, go.sum,
-requirements.txt, mise.lock.</p>
+<p>Supported lockfiles: Cargo.lock, package-lock.json, npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml,
+composer.lock, Gemfile.lock, go.sum, requirements.txt, poetry.lock, uv.lock, pdm.lock, Pipfile.lock, pom.xml,
+gradle.lockfile, packages.lock.json, pubspec.lock, mix.lock, mise.lock, and CycloneDX SBOMs named bom.json or
+bom.xml.</p>
 
 <h3>Data and privacy</h3>
 <ul>
@@ -34,10 +36,16 @@ requirements.txt, mise.lock.</p>
   <li>API credentials are kept in the IDE password safe only. No telemetry is collected.</li>
   <li>Scanning and lookups are disabled in untrusted projects.</li>
 </ul>
-<p>Anonymous scans are limited to 8 per hour; a free token from vuln.mlab.sh raises this to 25.</p>
+<p>Anonymous scans cover 512 packages with a 10 second cooldown. A token from a free vuln.mlab.sh account raises
+this to 1024 packages and 5 seconds; a paid plan to 4096 packages with no cooldown.</p>
 ]]></description>
 
     <change-notes><![CDATA[
+<p><b>1.2.0</b>: follows the vuln.mlab.sh scan API changes. Limits now follow your tier (anonymous 512 packages and a
+10 s cooldown, free account 1024 and 5 s, paid plan 4096 and none) instead of hourly quotas; background, batch and
+Rescan runs wait out the cooldown; refused and truncated scans show the server's explanation and the next tier.
+New lockfiles: yarn.lock, pnpm-lock.yaml, poetry.lock, uv.lock, pdm.lock, Pipfile.lock, pom.xml, gradle.lockfile,
+packages.lock.json, pubspec.lock, mix.lock, bom.json, bom.xml. Debian and Ubuntu advisories show their CVE.</p>
 <p><b>1.1.0</b>: first release for JetBrains IDEs, at parity with the VS Code extension 1.1.0: lockfile scans with
 consent, content cache and auto rescans, exploitation intelligence, report tab, findings tool window, Project view
 colors, inspection, CVE quick documentation, Analyze Selection, and <code>.mlab/config.json</code> layered settings.</p>

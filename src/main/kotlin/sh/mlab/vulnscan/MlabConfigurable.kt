@@ -57,7 +57,7 @@ class MlabConfigurable(private val project: Project) : BoundConfigurable("mlab")
             row {
                 browserLink("Generate a token at vuln.mlab.sh/me/tokens", TOKENS_URL)
             }
-            row { comment("Anonymous scans are capped at 8/hour per IP; a token raises this to 25/hour. Stored in the IDE password safe, never in settings or the project.") }
+            row { comment("Anonymous scans cover 512 packages, one every 10 s per IP. With a token, a free account covers 1024 with a 5 s cooldown and a paid plan 4096 with none. Stored in the IDE password safe, never in settings or the project.") }
         }
         group("mlab platform key") {
             row { cell(keyStatus) }
@@ -149,7 +149,8 @@ class MlabConfigurable(private val project: Project) : BoundConfigurable("mlab")
             val hasToken = Secret.SCAN_TOKEN.get() != null
             val hasKey = Secret.PLATFORM_KEY.get() != null
             ApplicationManager.getApplication().invokeLater({
-                tokenStatus.text = if (hasToken) "Token set: 25 scans/hour." else "Anonymous: 8 scans/hour per IP. Add a token for 25/hour."
+                tokenStatus.text = if (hasToken) "Token set: scans use your account's limits (Free 1024 packages, 5 s cooldown; paid 4096, none)."
+                    else "Anonymous: 512 packages per scan, one scan every 10 s per IP. Add a token for your account's limits."
                 keyStatus.text = if (hasKey) "Platform key set: lookups run against your plan quota." else "No platform key: lookups still work, at the anonymous quota."
             }, ModalityState.any())
         }

@@ -31,7 +31,11 @@ class LockfilesTest {
         assertEquals("cargo", detectFormat("Cargo.lock"))
         assertEquals("npm", detectFormat("npm-shrinkwrap.json"))
         assertEquals("pip", detectFormat("x/requirements.txt"))
+        assertEquals("maven", detectFormat("pom.xml"))
+        assertEquals("hex", detectFormat("mix.lock"))
+        assertEquals("cyclonedx", detectFormat("bom.xml"))
         assertNull(detectFormat("README.md"))
+        assertNull(detectFormat("build.gradle"))
     }
 }
 
@@ -119,6 +123,57 @@ class ScanApiTest {
     @Test fun `a GHSA only advisory has no CVE link`() {
         val out = buildOutcome(json("""{"hash":"h","count":1,"truncated":false,"packages":[{"name":"x","version":"1.0"}],"results":[{"ok":true,"vulns":[{"id":"GHSA-zzzz"}]}]}"""))
         assertNull(out.findings[0].url)
+    }
+}
+
+class ScanApiChangesTest {
+    private val upgradeToFree = """{"tier":"free","max_packages":1024,"cooldown_secs":5,"max_body_bytes":8388608,
+        "message":"Create a free account to scan up to 1024 packages per scan (8 MiB per request), with a 5 second cooldown.",
+        "url":"https://vuln.mlab.sh/sso/login?next=/scan"}"""
+
+    @Test fun `cveOf reads upstream and the id itself, as the server does`() {
+        assertEquals("CVE-2023-0001", cveOf(json("""{"id":"DSA-5000-1","upstream":["CVE-2023-0001","CVE-2023-0002"]}""")))
+        assertEquals("CVE-2023-5363", cveOf(json("""{"id":"DEBIAN-CVE-2023-5363","aliases":[]}""")))
+        assertEquals("GHSA-only", cveOf(json("""{"id":"GHSA-only","aliases":["PYSEC-2024-1"]}""")))
+    }
+
+    @Test fun `a truncated scan carries the server account of the cut, unscanned entries and tier`() {
+        val out = buildOutcome(json("""{"hash":"h","count":1,"truncated":true,"tier":"anonymous",
+            "truncation":{"total_packages":600,"scanned":512,"not_scanned":88,"message":"Only the first 512 of 600 packages were scanned.","upgrade":$upgradeToFree},
+            "unscanned":["pub flutter (sdk)"],
+            "packages":[{"name":"x","version":"1"}],"results":[{"ok":true,"vulns":[]}]}"""))
+        assertTrue(out.truncated)
+        assertEquals(88, out.truncation!!.notScanned)
+        assertEquals("free", out.truncation!!.upgrade!!.tier)
+        assertEquals(listOf("pub flutter (sdk)"), out.unscanned)
+        assertEquals("anonymous", out.tier)
+        assertNull(buildOutcome(json("""{"hash":"h","count":0,"truncated":false,"unscanned":[],"results":[]}""")).unscanned)
+    }
+
+    @Test fun `a cooldown shows the server message, the way up and the delay`() {
+        val e = errorFor(429, """{"error":"cooldown","retry_after_secs":7,"tier":"anonymous","upgrade":$upgradeToFree,
+            "message":"Anonymous scans are limited to one every 10 seconds. Retry in 7 seconds."}""", "7", "Cargo.lock")
+        assertEquals(ScanErrorKind.RATE_LIMIT, e.kind)
+        assertEquals("7", e.retryAfter)
+        assertEquals("free", e.upgrade!!.tier)
+        assertTrue(e.message!!.startsWith("Anonymous scans are limited to one every 10 seconds. Retry in 7 seconds. Create a free account"))
+        assertEquals(7, cooldownSecs(e))
+        // An older server without a JSON body still yields a usable cooldown.
+        val bare = errorFor(429, "", "10", "Cargo.lock")
+        assertEquals("10", bare.retryAfter)
+        assertTrue(bare.message!!.contains("Retry in 10 s"))
+        assertEquals(60, cooldownSecs(ScanException("x", ScanErrorKind.RATE_LIMIT, "600")))
+        assertNull(cooldownSecs(ScanException("x", ScanErrorKind.HTTP)))
+    }
+
+    @Test fun `413, 422, 401 and other statuses`() {
+        val big = errorFor(413, """{"error":"payload_too_large","message":"The request body is larger than 4 MiB, the anonymous limit.","upgrade":$upgradeToFree}""", null, "bom.json")
+        assertEquals(ScanErrorKind.TOO_LARGE, big.kind)
+        assertTrue(big.message!!.startsWith("The request body is larger than 4 MiB"))
+        assertEquals(ScanErrorKind.UNPARSEABLE, errorFor(422, """{"error":"no_dependencies"}""", null, "x.lock").kind)
+        assertEquals(ScanErrorKind.AUTH, errorFor(401, null, null, "x.lock").kind)
+        assertEquals("Scan failed: HTTP 400: fetching the manifest returned HTTP 404",
+            errorFor(400, """{"error":"fetch_failed","message":"fetching the manifest returned HTTP 404"}""", null, "x.lock").message)
     }
 }
 
@@ -248,6 +303,10 @@ class DiagnosticsTest {
         assertEquals(1, locateLine("first\r\nname = \"left-pad\"\r\n", "left-pad", "").line)
         assertEquals(Hit(0, 0, 0), locateLine("", "anything", "1.0"))
         assertEquals(0, locateLine("dep = \"foo.bar\" 1.0", "foo.bar", "1.0").line)
+
+        // A Maven group:artifact lands on its artifactId line in a pom.xml.
+        val pom = fixture("pom.xml")
+        assertEquals("<artifactId>log4j-core</artifactId>", pom.lines()[locateLine(pom, "org.apache.logging.log4j:log4j-core", "2.14.1").line].trim())
         locateLine("a\nb", "foo.bar+baz(", "1.0")
     }
 }

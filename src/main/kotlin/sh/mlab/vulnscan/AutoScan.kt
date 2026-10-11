@@ -19,7 +19,7 @@ import com.intellij.util.ui.update.Update
 // This does NOT weaken the consent rule: the listener only calls back into the
 // normal scan path, which is gated on the one time privacy consent, so until it
 // is given this produces no traffic at all. Writes are debounced because one
-// `npm install` rewrites the lockfile several times and each scan costs quota.
+// `npm install` rewrites the lockfile several times and the server spaces scans by a cooldown.
 
 const val DEBOUNCE_MS = 4000
 

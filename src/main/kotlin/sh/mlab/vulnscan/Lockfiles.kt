@@ -4,8 +4,8 @@ package sh.mlab.vulnscan
 // Everything else (menus, the auto scanner, the workspace sweep, the inspection)
 // asks these functions, so adding a format is a one line edit.
 //
-// The basename to format mapping mirrors the server's supported parsers, from
-// mlab-sh/vuln-scan-action (src/index.ts `KNOWN`), and the VS Code extension.
+// The basename to format mapping mirrors the server's supported parsers
+// (vuln.mlab.sh `sbom::pick_format`), and the VS Code extension.
 
 data class LockfileKind(val name: String, val format: String)
 
@@ -13,11 +13,25 @@ val LOCKFILES: List<LockfileKind> = listOf(
     LockfileKind("Cargo.lock", "cargo"),
     LockfileKind("package-lock.json", "npm"),
     LockfileKind("npm-shrinkwrap.json", "npm"),
+    LockfileKind("yarn.lock", "yarn"),
+    LockfileKind("pnpm-lock.yaml", "pnpm"),
     LockfileKind("composer.lock", "composer"),
     LockfileKind("Gemfile.lock", "gem"),
     LockfileKind("go.sum", "go"),
     LockfileKind("requirements.txt", "pip"),
+    LockfileKind("poetry.lock", "poetry"),
+    LockfileKind("uv.lock", "uv"),
+    LockfileKind("pdm.lock", "pdm"),
+    LockfileKind("Pipfile.lock", "pipfile"),
+    LockfileKind("pom.xml", "maven"),
+    LockfileKind("gradle.lockfile", "maven"),
+    LockfileKind("packages.lock.json", "nuget"),
+    LockfileKind("pubspec.lock", "pub"),
+    LockfileKind("mix.lock", "hex"),
     LockfileKind("mise.lock", "mise"),
+    // CycloneDX SBOMs under the spec's recommended names (JSON or XML).
+    LockfileKind("bom.json", "cyclonedx"),
+    LockfileKind("bom.xml", "cyclonedx"),
 )
 
 /** Directories skipped when sweeping a project for lockfiles. */

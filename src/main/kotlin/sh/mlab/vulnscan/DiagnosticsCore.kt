@@ -45,6 +45,10 @@ fun locateLine(text: String, name: String, version: String): Hit {
         if (fallback == -1) fallback = i
     }
     if (fallback != -1) return at(lines, fallback, name)
+    // A Maven coordinate `group:artifact` never appears whole in a pom.xml, where
+    // the two halves sit on separate lines: look for the artifact.
+    val colon = name.lastIndexOf(':')
+    if (colon > 0) return locateLine(text, name.substring(colon + 1), version)
     return Hit(0, 0, minOf(lines.firstOrNull()?.length ?: 0, 200))
 }
 

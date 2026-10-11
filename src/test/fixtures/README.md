@@ -1,7 +1,7 @@
 # Test workspace
 
-Shared verbatim with the VS Code extension. `./gradlew runIde`, then open this
-folder in the sandbox IDE. Everything here exists to exercise one behaviour.
+`F5` opens an Extension Development Host on this folder. Everything here exists
+to exercise one behaviour of the extension.
 
 ## Lockfiles, one per supported format
 
@@ -15,6 +15,19 @@ folder in the sandbox IDE. Everything here exists to exercise one behaviour.
 | `go.sum` | `golang.org/x/text` and others | Go, plus the `/go.mod` duplicate that must be collapsed |
 | `requirements.txt` | PyYAML, urllib3, Django, requests, jinja2 | PyPI. **Heavy on purpose**: Django 2.2.0 alone carries 85 advisories, so this is the stress case for report rendering, sorting and enrichment concurrency |
 | `mise.lock` | `lodash` only | mise, where `node` must be skipped because a core tool has no OSV coordinates |
+| `yarn.lock` | `lodash 4.17.15` | yarn v1 |
+| `pnpm-lock.yaml` | `minimist 1.2.5` | pnpm v9 (`name@version` keys) |
+| `poetry.lock` | `requests 2.19.1` | Poetry |
+| `uv.lock` | `urllib3 1.26.4` | uv, where the project's own editable entry must be skipped |
+| `pdm.lock` | `jinja2 2.10` | PDM |
+| `Pipfile.lock` | `pyyaml 5.3` | Pipenv |
+| `pom.xml` | `log4j-core 2.14.1` | Maven: the diagnostic lands on the `artifactId` line; `jackson-databind` uses a `${property}` version, so it is reported as not scanned |
+| `gradle.lockfile` | `jackson-databind 2.9.10`, `snakeyaml 1.33` | Gradle locking |
+| `packages.lock.json` | `Newtonsoft.Json 12.0.1` | NuGet |
+| `pubspec.lock` | `http 0.12.0` | Dart / Flutter; the `flutter` SDK entry is reported as not scanned |
+| `mix.lock` | `plug 1.3.0` | Elixir / Hex; the git dependency is reported as not scanned |
+| `bom.json` | `lodash` (purl), `openssl 3.0.1` (CPE only) | CycloneDX JSON: the CPE component is matched against NVD, the one with neither purl nor CPE is reported as not scanned |
+| `bom.xml` | `log4j-core 2.14.1` | CycloneDX XML |
 
 ## Structure
 

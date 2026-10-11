@@ -25,6 +25,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import java.time.Instant
+import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -107,7 +108,8 @@ class ScanService(private val project: Project) {
                 cache.forget(path)
                 continue
             }
-            if (!ReadAction.compute<Boolean, Throwable> { ProjectFileIndex.getInstance(project).isInContent(file) }) continue
+            // Background (startup activity): a non-blocking read action, retried if a write interrupts it.
+            if (!ReadAction.nonBlocking(Callable { ProjectFileIndex.getInstance(project).isInContent(file) }).executeSynchronously()) continue
             val entry = cache.peek(path) ?: continue
             records[path] = ScanRecord(path, entry.filename, entry.outcome, entry.at)
             restored++
@@ -162,7 +164,20 @@ class ScanService(private val project: Project) {
             val apiUrl = MlabConfig.apiUrl(project).value
             val scanToken = Secret.SCAN_TOKEN.get()
             log.info("mlab: ${if (auto) "auto" else if (batch) "sweep" else "scan"} $filename -> $apiUrl (${if (scanToken != null) "token" else "anonymous"})")
-            val outcome = scanLockfile(apiUrl, filename, detectFormat(filename), body, scanToken, MlabConfig.timeoutMs(project).value)
+            val scan = { scanLockfile(apiUrl, filename, detectFormat(filename), body, scanToken, MlabConfig.timeoutMs(project).value) }
+            val outcome = try {
+                scan()
+            } catch (e: ScanException) {
+                // The server spaces scans by a cooldown of a few seconds. A
+                // background or batch scan waits it out once rather than failing;
+                // an explicit scan reports it, with the server's own message.
+                val wait = cooldownSecs(e)
+                if (!quiet || wait == null) throw e
+                log.info("mlab: $filename cooldown, retrying in ${wait}s")
+                indicator.text2 = "Waiting ${wait}s for the scan cooldown"
+                repeat(wait * 10) { indicator.checkCanceled(); Thread.sleep(100) }
+                scan()
+            }
             indicator.text2 = "Fetching exploitation data"
             enrich(outcome)
             cache.put(file.path, filename, hash, outcome)
@@ -201,17 +216,22 @@ class ScanService(private val project: Project) {
         val message = if (e is ScanException) e.message ?: "Scan failed." else "Unexpected error: ${e.message}"
         log.warn("mlab: $filename ${kind ?: "error"}: $message", e.takeIf { e !is ScanException })
         if (token != null) MlabViews.get(project).finishScan(token, "Report · $filename", errorHtml(filename, message, kind, MlabViews.get(project).opts()))
-        // A background scan never interrupts: a rate limit would otherwise pop
-        // on every debounced write for the rest of the hour.
+        // A background scan never interrupts: it already waited out one cooldown.
         if (quiet) return
         when (kind) {
-            ScanErrorKind.RATE_LIMIT -> {
-                val retry = (e as ScanException).retryAfter?.let { " Retry after ${it}s." } ?: ""
-                notify(
-                    project, "Rate limit reached.$retry Use an API token for 25 scans/hour.", NotificationType.WARNING,
-                    NotificationAction.createSimpleExpiring("Get a token") { BrowserUtil.browse(TOKENS_URL) },
-                    NotificationAction.createSimpleExpiring("Add token…") { openSettings(project) },
-                )
+            ScanErrorKind.RATE_LIMIT, ScanErrorKind.TOO_LARGE -> {
+                // The message is the server's (cooldown or size limit, then what
+                // the next tier unlocks); the actions lead to that tier.
+                val upgrade = (e as ScanException).upgrade
+                val actions = when {
+                    upgrade == null -> emptyList()
+                    upgrade.tier == "paid" -> listOf(NotificationAction.createSimpleExpiring("See plans") { BrowserUtil.browse(upgrade.url) })
+                    else -> listOf(
+                        NotificationAction.createSimpleExpiring("Get a token") { BrowserUtil.browse(TOKENS_URL) },
+                        NotificationAction.createSimpleExpiring("Add token…") { openSettings(project) },
+                    )
+                }
+                notify(project, message, NotificationType.WARNING, *actions.toTypedArray())
             }
             ScanErrorKind.CANCELLED -> Unit
             else -> notify(project, message, NotificationType.ERROR)
@@ -286,14 +306,30 @@ class ScanService(private val project: Project) {
         log.info("mlab: ${entry.filename} shown from cache, scanned ${Instant.ofEpochMilli(entry.at)}")
     }
 
-    /** Rescan every lockfile in the tool window. Only reachable by an explicit click. */
+    /**
+     * Rescan every lockfile in the tool window, one at a time as a batch: the
+     * server's cooldown between scans is waited out instead of reported per
+     * file. Only reachable by an explicit click.
+     */
     fun rescan() {
         val files = records.values.sortedBy { it.at }.mapNotNull { LocalFileSystem.getInstance().findFileByPath(it.path) }
         if (files.isEmpty()) {
             notify(project, "Nothing to rescan yet. Run a scan first.", NotificationType.INFORMATION)
             return
         }
-        files.forEach { checkLockfile(it) }
+        object : Task.Backgroundable(project, "mlab: rescanning", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = false
+                var failed = 0
+                for ((i, f) in files.withIndex()) {
+                    indicator.checkCanceled()
+                    indicator.fraction = i.toDouble() / files.size
+                    indicator.text2 = "${f.name} (${i + 1}/${files.size})"
+                    if (performScan(f, indicator, batch = true) is ScanResult.Failed) failed++
+                }
+                if (failed > 0) notify(project, "$failed rescan${if (failed == 1) "" else "s"} failed. See the IDE log.", NotificationType.WARNING)
+            }
+        }.queue()
     }
 
     /** Clearing results also drops the cache, which is what removes the colors. */
@@ -307,19 +343,21 @@ class ScanService(private val project: Project) {
 
     // ── Scan every lockfile in the project ──────────────────────────────────
 
-    /** Supported lockfiles in the project content, skipping vendored directories. */
-    fun findLockfiles(): List<VirtualFile> = ReadAction.compute<List<VirtualFile>, Throwable> {
+    /** Supported lockfiles in the project content, skipping vendored directories. Background thread only. */
+    fun findLockfiles(): List<VirtualFile> = ReadAction.nonBlocking(Callable {
         val out = mutableListOf<VirtualFile>()
         ProjectFileIndex.getInstance(project).iterateContent(
             { f -> if (!f.isDirectory && isSupportedLockfile(f.name)) out += f; true },
             { f -> !(f.isDirectory && f.name in SKIP_DIRS) },
         )
         out
-    }
+    }).executeSynchronously()
 
     /**
-     * Quota aware: cached lockfiles cost nothing, so the sweep first works out
-     * how many files would really hit the network, and asks before spending.
+     * Cached lockfiles cost nothing, so the sweep first works out how many files
+     * would really hit the network, and asks before uploading them. The server
+     * spaces scans by a cooldown (10 s anonymous, 5 s on a free account, none on
+     * a paid plan), which performScan waits out between files.
      */
     fun scanWorkspace() {
         if (!isTrusted()) {
@@ -343,7 +381,8 @@ class ScanService(private val project: Project) {
                     ApplicationManager.getApplication().invokeAndWait({
                         go = MessageDialogBuilder.okCancel(
                             "mlab: ${fresh.size} lockfiles need a fresh scan",
-                            "That spends ${fresh.size} of your hourly quota (8 anonymous, 25 with a token).$cachedNote",
+                            "They are uploaded one at a time, waiting out the scan cooldown in between " +
+                                "(10 s anonymous, 5 s with a free account token, none on a paid plan).$cachedNote",
                         ).yesText("Scan ${fresh.size}").ask(project)
                     }, ModalityState.defaultModalityState())
                     if (!go) return
@@ -365,14 +404,15 @@ class ScanService(private val project: Project) {
                         is ScanResult.Cached -> { reused++; if (r.outcome.findings.isNotEmpty()) vulnerable++ }
                         is ScanResult.Scanned -> { scanned++; consented = true; if (r.outcome.findings.isNotEmpty()) vulnerable++ }
                         is ScanResult.Skipped -> if (r.reason == "no-consent") { stopped = "no-consent"; break }
-                        // A rate limit hits every remaining file too: stop, do not burn the run.
+                        // performScan already waited out one cooldown; still refused
+                        // means the next files would be too: stop, do not burn the run.
                         is ScanResult.Failed -> if ((r.error as? ScanException)?.kind == ScanErrorKind.RATE_LIMIT) { stopped = "rate-limit"; break }
                     }
                 }
                 val line = "$scanned scanned, $reused from cache. $vulnerable lockfile${if (vulnerable == 1) "" else "s"} with known vulnerabilities."
                 log.info("mlab: sweep $line")
                 when {
-                    stopped == "rate-limit" -> notify(project, "$line Stopped early: hourly quota reached.", NotificationType.WARNING)
+                    stopped == "rate-limit" -> notify(project, "$line Stopped early: the server kept refusing scans (cooldown).", NotificationType.WARNING)
                     stopped == "no-consent" -> Unit
                     vulnerable > 0 -> notify(project, line, NotificationType.WARNING)
                     else -> notify(project, line, NotificationType.INFORMATION)
@@ -386,12 +426,19 @@ class ScanService(private val project: Project) {
     }
 }
 
-/** Is `file` a lockfile this project should auto scan (in content, not vendored)? */
+/** Seconds to wait before retrying, when [e] is a cooldown (429): at most a minute. */
+fun cooldownSecs(e: ScanException): Int? {
+    if (e.kind != ScanErrorKind.RATE_LIMIT) return null
+    return (e.retryAfter?.toDoubleOrNull()?.toInt() ?: 10).coerceIn(1, 60)
+}
+
+/**
+ * Is `file` a lockfile this project should auto scan (in content, not vendored)?
+ * Called from the VFS listener, which runs under the write lock: reading the
+ * file index needs no read action there.
+ */
 fun isWatchedLockfile(project: Project, file: VirtualFile): Boolean {
     if (!isSupportedLockfile(file.name)) return false
-    return ReadAction.compute<Boolean, Throwable> {
-        val index = ProjectFileIndex.getInstance(project)
-        val root = index.getContentRootForFile(file) ?: return@compute false
-        generateSequence(file.parent) { it.parent }.takeWhile { it != root }.none { it.name in SKIP_DIRS }
-    }
+    val root = ProjectFileIndex.getInstance(project).getContentRootForFile(file) ?: return false
+    return generateSequence(file.parent) { it.parent }.takeWhile { it != root }.none { it.name in SKIP_DIRS }
 }

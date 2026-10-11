@@ -100,7 +100,12 @@ fun reportHtml(filename: String, outcome: ScanOutcome, opts: RenderOpts, scanned
     val exploited = findings.filter { urgencyOf(it.intel) == Urgency.EXPLOITED }
     val deps = outcome.deps
     val whenLabel = if (scannedAt == null) "scanned just now" else "cached, scanned ${esc(agoLabel(scannedAt, now))}"
-    val meta = "${plural(deps, "dependency", "dependencies")} · $whenLabel"
+    val truncation = outcome.truncation
+    val unscanned = outcome.unscanned.orEmpty()
+    val scope = if (truncation != null) "${truncation.scanned} of ${plural(truncation.totalPackages, "dependency", "dependencies")} scanned"
+        else plural(deps, "dependency", "dependencies")
+    val meta = "$scope · $whenLabel"
+    val notScanned = outcome.unresolved.size + unscanned.size + (truncation?.notScanned ?: 0)
 
     val verdict = if (clean) """<div class="verdict ok">${icon("shield", 30)}<div>
         <div class="verdict-num">No known vulnerabilities</div>
@@ -114,7 +119,7 @@ fun reportHtml(filename: String, outcome: ScanOutcome, opts: RenderOpts, scanned
       ${stat(vulnerable, "Vulnerable", if (vulnerable > 0) "bad" else "")}
       ${stat(findings.size, "Advisories")}
       ${if (exploited.isNotEmpty()) stat(exploited.size, "Exploited", "bad") else ""}
-      ${if (outcome.unresolved.isNotEmpty()) stat(outcome.unresolved.size, "Not scanned", "warn") else ""}
+      ${if (notScanned > 0) stat(notScanned, "Not scanned", "warn") else ""}
     </div>"""
 
     val banners = buildList {
@@ -128,8 +133,22 @@ fun reportHtml(filename: String, outcome: ScanOutcome, opts: RenderOpts, scanned
         if (scannedAt != null) {
             add("""<div class="banner info">${icon("info")}<span>Cached result. The lockfile has not changed since it was scanned, so nothing was re-uploaded.</span></div>""")
         }
-        if (outcome.truncated) {
-            add("""<div class="banner warn">${icon("triangle")}<span>This manifest exceeds the 512 package scan ceiling; only the first 512 packages were scanned.</span></div>""")
+        if (truncation != null) {
+            // The server's own wording: how many were cut, why, and that they are not clean.
+            val up = truncation.upgrade?.let {
+                """ ${esc(it.message)} <a href="${esc(it.url)}">${if (it.tier == "free") "Create a free account" else "See plans"}</a>"""
+            } ?: ""
+            add("""<div class="banner warn">${icon("triangle")}<span>${esc(truncation.message)}$up</span></div>""")
+        } else if (outcome.truncated) {
+            // A result cached by an older version carries only the flag.
+            add("""<div class="banner warn">${icon("triangle")}<span>This manifest was larger than the scan limit: only the first $deps packages were scanned, the rest are <strong>not</strong> counted as clean.</span></div>""")
+        }
+        if (unscanned.isNotEmpty()) {
+            val n = unscanned.size
+            add(
+                """<div class="banner warn">${icon("info")}<span>${plural(n, "entry", "entries")} of the manifest could not be scanned (git or path dependency, unpinned version, SBOM component without purl or cpe…) and ${if (n == 1) "is" else "are"} <strong>not</strong> counted as clean: """ +
+                    """<span class="mono">${esc(unscanned.take(20).joinToString(", "))}${if (n > 20) ", ..." else ""}</span></span></div>""",
+            )
         }
         if (outcome.unresolved.isNotEmpty()) {
             val n = outcome.unresolved.size
@@ -196,9 +215,10 @@ private fun rowHtml(f: Finding): String {
 }
 
 fun errorHtml(filename: String, message: String, kind: ScanErrorKind?, opts: RenderOpts): String {
-    val benign = kind == ScanErrorKind.UNPARSEABLE || kind == ScanErrorKind.CANCELLED
+    val benign = kind == ScanErrorKind.UNPARSEABLE || kind == ScanErrorKind.CANCELLED || kind == ScanErrorKind.RATE_LIMIT
     val hint = when (kind) {
-        ScanErrorKind.RATE_LIMIT -> "Add an API token in <code>Settings | Tools | mlab</code> to raise your quota to 25 scans/hour."
+        ScanErrorKind.RATE_LIMIT -> "Scans are spaced by a short cooldown; scan again once it has passed. An API token in <code>Settings | Tools | mlab</code> applies your account's limits instead of the anonymous ones."
+        ScanErrorKind.TOO_LARGE -> "Scan the lockfile itself rather than a full SBOM export, or use an API token: larger plans accept larger files."
         ScanErrorKind.AUTH -> "Update your token in <code>Settings | Tools | mlab</code>."
         ScanErrorKind.NETWORK, ScanErrorKind.TIMEOUT -> "Check your connection and try again. Previous results, if any, are kept."
         else -> ""

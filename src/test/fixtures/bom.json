@@ -1,0 +1,10 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "metadata": {"component": {"type": "application", "name": "demo", "version": "1.0.0"}},
+  "components": [
+    {"type": "library", "name": "lodash", "version": "4.17.15", "purl": "pkg:npm/lodash@4.17.15"},
+    {"type": "library", "name": "openssl", "version": "3.0.1", "cpe": "cpe:2.3:a:openssl:openssl:3.0.1:*:*:*:*:*:*:*"},
+    {"type": "library", "name": "vendored-blob", "version": "2.0"}
+  ]
+}

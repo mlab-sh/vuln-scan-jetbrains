@@ -37,12 +37,31 @@ contents change (turn it off in **Settings | Tools | mlab**), and:
 | SecretStorage | IDE password safe |
 | Restricted Mode | Untrusted projects: scanning and lookups disabled |
 
-## API token and quotas
+## Supported lockfiles
 
-Anonymous scans are limited to **8 per hour per IP**; a personal token from
-[vuln.mlab.sh/me/tokens](https://vuln.mlab.sh/me/tokens) raises this to **25**.
-Paste it in **Settings | Tools | mlab**. Indicator lookups use a separate mlab
-platform key, optional.
+`Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`,
+`pnpm-lock.yaml`, `composer.lock`, `Gemfile.lock`, `go.sum`, `requirements.txt`,
+`poetry.lock`, `uv.lock`, `pdm.lock`, `Pipfile.lock`, `pom.xml`,
+`gradle.lockfile`, `packages.lock.json`, `pubspec.lock`, `mix.lock`, `mise.lock`,
+and CycloneDX SBOMs named `bom.json` or `bom.xml`. One line each in
+`Lockfiles.kt`; the fixtures in `src/test/fixtures` are shared with the VS Code
+extension.
+
+## API token and limits
+
+| | Packages per scan | Request size | Cooldown between scans |
+| --- | --- | --- | --- |
+| Anonymous (per IP) | 512 | 4 MiB | 10 s |
+| Free account, with a token | 1024 | 8 MiB | 5 s |
+| Paid plan, with a token | 4096 | 32 MiB | none |
+
+Get a token at [vuln.mlab.sh/me/tokens](https://vuln.mlab.sh/me/tokens) and
+paste it in **Settings | Tools | mlab**. Background, batch and Rescan runs wait
+out the cooldown and retry once; an explicit scan shows the server's message
+(how long to wait, what the next tier unlocks). A manifest with more packages
+than your tier scans is cut, and the report says how many were left out and that
+they are not counted as clean. Indicator lookups use a separate mlab platform
+key, optional.
 
 ## Settings
 
