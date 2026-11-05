@@ -15,7 +15,13 @@ import java.net.URLEncoder
 
 class HttpFailure(message: String, val kind: ScanErrorKind) : IOException(message)
 
-data class HttpResponse(val status: Int, val body: String, val retryAfter: String?)
+/** [headers] holds only the `x-ratelimit-*` headers, names lowercased. */
+data class HttpResponse(
+    val status: Int,
+    val body: String,
+    val retryAfter: String?,
+    val headers: Map<String, String> = emptyMap(),
+)
 
 object Http {
     fun request(
@@ -39,7 +45,11 @@ object Http {
                     val conn = req.connection as HttpURLConnection
                     val status = conn.responseCode
                     val text = req.readString(ProgressManager.getInstance().progressIndicator)
-                    HttpResponse(status, text, conn.getHeaderField("Retry-After"))
+                    val rateLimit = conn.headerFields.orEmpty()
+                        .filterKeys { it != null && it.lowercase().startsWith("x-ratelimit-") }
+                        .mapNotNull { (k, v) -> v.firstOrNull()?.let { k.lowercase() to it } }
+                        .toMap()
+                    HttpResponse(status, text, conn.getHeaderField("Retry-After"), rateLimit)
                 }
         } catch (e: SocketTimeoutException) {
             throw HttpFailure("timed out", ScanErrorKind.TIMEOUT)
@@ -59,13 +69,4 @@ fun hostOf(url: String): String = runCatching { URI(url).host }.getOrNull() ?: u
 fun originOf(url: String): String {
     val u = URI(url)
     return "${u.scheme}://${u.host}${if (u.port != -1) ":${u.port}" else ""}"
-}
-
-/** Interruptible sleep for polling loops: wakes early when the task is cancelled. */
-fun sleepChecked(ms: Long) {
-    val end = System.currentTimeMillis() + ms
-    while (System.currentTimeMillis() < end) {
-        ProgressManager.checkCanceled()
-        Thread.sleep(minOf(100L, end - System.currentTimeMillis()).coerceAtLeast(1))
-    }
 }

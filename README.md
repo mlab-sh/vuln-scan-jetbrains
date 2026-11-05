@@ -80,7 +80,11 @@ The settings page says when a file overrides a value. Keys: `autoScan`,
 
 - Only the lockfile you scan goes to `vuln.mlab.sh` (or your `apiUrl`).
 - CVE details send only the identifier; Analyze Selection only the selected
-  value. A domain lookup is the only kind that contacts the target.
+  value, and nothing it does contacts the indicator. A selected domain is never
+  scanned from the IDE: its page on mlab.sh opens in the browser (showing the
+  latest report, or a button to start a scan there).
+- With a platform key, the lookup panel shows the quota left, read from the
+  `X-RateLimit-*` headers (only IP lookups spend it, over a rolling 24 hours).
 - All requests go through the IDE's HTTP stack, so its proxy settings apply.
 - No telemetry.
 

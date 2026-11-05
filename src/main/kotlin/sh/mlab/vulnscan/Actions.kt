@@ -1,5 +1,6 @@
 package sh.mlab.vulnscan
 
+import com.intellij.ide.BrowserUtil
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -124,9 +125,16 @@ fun analyze(project: Project, value: String) {
         return
     }
     val kind = detectKind(value)
+    // A domain is never scanned from here: a scan contacts the target and spends
+    // the organisation's quota. Its page on mlab.sh shows the latest report, or
+    // offers to start a scan, which the user then launches themselves.
+    if (kind.opensInBrowser) {
+        webUrlFor(originOf(MlabConfig.platformUrl(project).value), kind, value)?.let { BrowserUtil.browse(it) }
+        return
+    }
     if (!kind.isSupported) {
         val short = if (value.length <= 40) value else value.take(39) + "…"
-        notify(project, "Could not tell what \"$short\" is, so nothing was sent. Supported: URL, IP, email, file hash, MAC address, domain.", NotificationType.INFORMATION)
+        notify(project, "Could not tell what \"$short\" is, so nothing was sent. Supported: URL, IP, email, file hash, MAC address, and domains (opened on mlab.sh).", NotificationType.INFORMATION)
         return
     }
 
@@ -140,26 +148,16 @@ fun analyze(project: Project, value: String) {
                 val key = Secret.PLATFORM_KEY.get()
                 val base = MlabConfig.platformUrl(project).value
                 val timeout = MlabConfig.timeoutMs(project).value
-                val report = if (kind.isActive) {
-                    // A domain is launched, polled, then read, and it contacts the target.
-                    scanDomain(base, value, key, timeout) { state ->
-                        indicator.text2 = when (state) {
-                            DomainState.REUSED -> "reusing the existing scan, no quota spent"
-                            DomainState.DONE -> "collecting results"
-                            else -> "${state.name.lowercase()}…"
-                        }
-                    }
-                } else {
-                    lookup(base, kind, value, key, timeout)
-                }
+                val report = lookup(base, kind, value, key, timeout)
                 // Always offer the full result in a browser: the view is a summary.
                 report.webUrl = webUrlFor(originOf(base), kind, value)
                 views.show("indicator", title, indicatorHtml(report, views.opts()))
             } catch (ex: IndicatorException) {
                 views.show("indicator", title, indicatorErrorHtml(kind, value, ex.message ?: "Lookup failed.", views.opts()))
-                if (ex.kind == ScanErrorKind.RATE_LIMIT) {
+                if (ex.kind == ScanErrorKind.RATE_LIMIT || ex.kind == ScanErrorKind.AUTH) {
+                    val label = if (ex.kind == ScanErrorKind.AUTH) "Replace the platform key" else "Add a platform key"
                     notify(project, ex.message ?: "", NotificationType.WARNING,
-                        NotificationAction.createSimpleExpiring("Add a platform key") { openSettings(project) })
+                        NotificationAction.createSimpleExpiring(label) { openSettings(project) })
                 } else {
                     notify(project, ex.message ?: "Lookup failed.", NotificationType.ERROR)
                 }

@@ -2,8 +2,6 @@ package sh.mlab.vulnscan
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.intellij.openapi.progress.ProcessCanceledException
-import kotlin.math.min
 
 // Client for the indicator endpoints on the mlab platform API.
 //
@@ -31,7 +29,7 @@ fun endpointFor(base: String, kind: IndicatorKind, value: String): String? {
 fun webUrlFor(site: String, kind: IndicatorKind, value: String): String? {
     val origin = site.trimEnd('/')
     if (kind == IndicatorKind.URL) return "$origin/url?q=${enc(value)}"
-    if (!kind.isSupported) return null
+    if (!kind.isSupported && !kind.opensInBrowser) return null
     return "$origin/${kind.name.lowercase()}/${enc(value)}"
 }
 
@@ -48,84 +46,78 @@ data class IndicatorReport(
     val findings: List<IndicatorFinding>,
     val facts: List<Fact>,
     var webUrl: String? = null,
+    /** What is left of the key's quota, from the X-RateLimit-* headers. */
+    var quota: Quota? = null,
 )
 
-class IndicatorException(message: String, val kind: ScanErrorKind) : Exception(message)
+/** The platform quota as reported on a key call that spends it. */
+data class Quota(val limit: Int, val remaining: Int, val resource: String?, val windowSecs: Int?)
 
-private fun getJson(url: String, key: String?, timeoutMs: Int, method: String = "GET", body: String? = null): JsonObject {
-    val resp = try {
-        Http.request(url, method, body?.toByteArray(), if (body != null) "application/json" else null, key, timeoutMs)
-    } catch (e: HttpFailure) {
-        if (e.kind == ScanErrorKind.TIMEOUT) throw IndicatorException("Lookup timed out after $timeoutMs ms.", e.kind)
-        throw IndicatorException("Could not reach the mlab platform: ${e.message}", ScanErrorKind.NETWORK)
-    }
-    when (resp.status) {
-        401, 403 -> throw IndicatorException(
-            "The mlab platform key was rejected (or this lookup needs a plan that allows it).", ScanErrorKind.AUTH,
+/** Read the X-RateLimit-* headers (names lowercased), or null when the call spent no quota. */
+fun readQuota(headers: Map<String, String>): Quota? {
+    val limit = headers["x-ratelimit-limit"]?.toIntOrNull() ?: return null
+    val remaining = headers["x-ratelimit-remaining"]?.toIntOrNull() ?: return null
+    return Quota(limit, remaining, headers["x-ratelimit-resource"], headers["x-ratelimit-window"]?.toIntOrNull()?.takeIf { it > 0 })
+}
+
+/** One line for the panel and the log. */
+fun quotaLine(q: Quota): String =
+    "${q.remaining} of ${q.limit}${q.resource?.let { " $it" } ?: ""} lookups left${if (q.windowSecs == 86400) " per rolling 24 h" else ""}"
+
+class IndicatorException(message: String, val kind: ScanErrorKind, val retryAfter: String? = null) : Exception(message)
+
+/**
+ * The error for a refused lookup, worded for someone who has to act on it.
+ *
+ * The platform answers 401 to a key it does not know: mistyped, revoked, or
+ * expired (keys expire after 90 days unless set otherwise). 403 means the key is
+ * valid but lacks the permission, and the server's own message names it. 429 is
+ * the quota, which refills over a rolling 24 hours.
+ */
+fun indicatorErrorFor(status: Int, body: String, withKey: Boolean, retryAfter: String? = null): IndicatorException {
+    val said = runCatching { JsonParser.parseString(body).obj()?.s("error") }.getOrNull()
+    return when (status) {
+        401 -> IndicatorException(
+            if (withKey) "The mlab platform key was not accepted: it is mistyped, revoked or expired (keys expire after 90 days by default). Create a new one in your organization settings on mlab.sh."
+            else "The mlab platform refused the anonymous lookup (401).",
+            ScanErrorKind.AUTH,
         )
-        429 -> throw IndicatorException("Daily lookup quota reached. Adding an mlab platform key raises it.", ScanErrorKind.RATE_LIMIT)
+        403 -> IndicatorException(said ?: "The mlab platform key is not allowed to make this lookup.", ScanErrorKind.AUTH)
+        else -> {
+            val base = if (said != null && said != "limit") said.trimEnd('.') + "." else "Lookup quota reached."
+            IndicatorException(
+                "$base The quota refills over a rolling 24 hours${if (withKey) "" else "; an mlab platform key raises it"}.",
+                ScanErrorKind.RATE_LIMIT,
+                retryAfter,
+            )
+        }
     }
-    if (resp.status !in 200..299) throw IndicatorException("Lookup failed: HTTP ${resp.status}.", ScanErrorKind.HTTP)
-    return try {
-        JsonParser.parseString(resp.body).obj()
-    } catch (_: Exception) {
-        null
-    } ?: throw IndicatorException("The platform returned a response that was not valid JSON.", ScanErrorKind.BAD_RESPONSE)
 }
 
 /** One direct lookup. Blocking: call from a background task. */
 fun lookup(base: String, kind: IndicatorKind, value: String, key: String?, timeoutMs: Int): IndicatorReport {
     val url = endpointFor(base, kind, value) ?: throw IndicatorException("No endpoint for a ${kind.label}.", ScanErrorKind.HTTP)
-    return summarizeIndicator(kind, value, getJson(url, key, timeoutMs))
+    val resp = try {
+        Http.request(url, bearer = key, timeoutMs = timeoutMs)
+    } catch (e: HttpFailure) {
+        if (e.kind == ScanErrorKind.TIMEOUT) throw IndicatorException("Lookup timed out after $timeoutMs ms.", e.kind)
+        throw IndicatorException("Could not reach the mlab platform: ${e.message}", ScanErrorKind.NETWORK)
+    }
+    return reportFrom(kind, value, resp, key != null)
 }
 
-// ── Domain, which is a scan rather than a lookup ─────────────────────────────
-
-enum class DomainState { PENDING, SCANNING, DONE, REUSED }
-
-fun readState(raw: JsonObject): DomainState = when (raw.s("status")) {
-    "pending" -> DomainState.PENDING
-    "scanning" -> DomainState.SCANNING
-    else -> DomainState.DONE
-}
-
-/** Gap before the next poll, growing so a long scan does not hammer the API. */
-fun pollDelay(attempt: Int): Long = min(2000L + attempt * 1000L, 8000L)
-
-const val MAX_POLLS = 40
-
-fun isCompleted(raw: JsonObject): Boolean =
-    raw.s("status") == "completed" && raw.get("results").let { it != null && !it.isJsonNull }
-
-/**
- * Launch a domain scan, wait for it, return the report. An existing completed
- * scan is reused first: reading it is a free GET, while `POST /scan/domain`
- * purges and relaunches and always spends one of the daily scans.
- */
-fun scanDomain(base: String, domain: String, key: String?, timeoutMs: Int, onState: (DomainState) -> Unit): IndicatorReport {
-    val origin = base.trimEnd('/')
-    val resultsUrl = "$origin/scan/domain/results?domain=${enc(domain)}"
-    val existing = try {
-        getJson(resultsUrl, key, timeoutMs).takeIf(::isCompleted)
-    } catch (e: ProcessCanceledException) {
-        throw e
-    } catch (_: IndicatorException) {
-        null // no scan yet, or the read failed: launch one
+/** A response turned into a report, or the mapped error. Split out to be unit tested. */
+fun reportFrom(kind: IndicatorKind, value: String, resp: HttpResponse, withKey: Boolean): IndicatorReport {
+    if (resp.status == 401 || resp.status == 403 || resp.status == 429) {
+        throw indicatorErrorFor(resp.status, resp.body, withKey, resp.retryAfter)
     }
-    if (existing != null) {
-        onState(DomainState.REUSED)
-        return summarizeIndicator(IndicatorKind.DOMAIN, domain, existing)
-    }
-
-    getJson("$origin/scan/domain", key, timeoutMs, "POST", """{"domain":${com.google.gson.JsonPrimitive(domain)}}""")
-    val statusUrl = "$origin/scan/domain/status?domain=${enc(domain)}"
-    for (i in 0 until MAX_POLLS) {
-        val state = readState(getJson(statusUrl, key, timeoutMs))
-        onState(state)
-        if (state == DomainState.DONE) return summarizeIndicator(IndicatorKind.DOMAIN, domain, getJson(resultsUrl, key, timeoutMs))
-        sleepChecked(pollDelay(i))
-    }
-    throw IndicatorException("The domain scan is still running. Open it on mlab to follow it there.", ScanErrorKind.TIMEOUT)
+    if (resp.status !in 200..299) throw IndicatorException("Lookup failed: HTTP ${resp.status}.", ScanErrorKind.HTTP)
+    val raw = try {
+        JsonParser.parseString(resp.body).obj()
+    } catch (_: Exception) {
+        null
+    } ?: throw IndicatorException("The platform returned a response that was not valid JSON.", ScanErrorKind.BAD_RESPONSE)
+    return summarizeIndicator(kind, value, raw).also { if (withKey) it.quota = readQuota(resp.headers) }
 }
 
 // ── Normalisation ────────────────────────────────────────────────────────────
@@ -207,30 +199,7 @@ fun summarizeIndicator(kind: IndicatorKind, value: String, raw: JsonObject): Ind
             push("Reverse DNS", raw.o("rdns").s("name") ?: raw.o("rdns").s("ptr"), true)
             push("Abuse contact", raw.o("rdap").s("abuse_email"), true)
         }
-        IndicatorKind.DOMAIN -> {
-            // The payload is an envelope: { domain, scan_date, status, results: {...} }.
-            val res = raw.o("results")
-            val dns = res.o("dns")
-            val txt = dns.o("txt")
-            val suspicious = res.a("subdomains_suspicious").strings()
-            val subdomains = res.a("subdomains")?.size() ?: 0
-            val ssl = res.a("ssl")?.size() ?: 0
-            if (suspicious.isNotEmpty()) {
-                verdict = Verdict("${suspicious.size} suspicious subdomain${if (suspicious.size == 1) "" else "s"}", Tone.WARN)
-            }
-            push("Scanned", raw.s("scan_date"))
-            val resolve = dns.a("resolve")?.firstOrNull().obj()
-            push("A records", resolve.a("a").strings().joinToString(", "), true)
-            push("AAAA records", resolve.a("aaaa").strings().joinToString(", "), true)
-            push("SPF", if (txt.s("spf") != null) "present" else "absent")
-            push("DMARC", if (txt.s("dmarc") != null) "present" else "absent")
-            push("DKIM", if ((txt.a("dkim")?.size() ?: 0) > 0) "present" else "absent")
-            push("Subdomains", if (subdomains > 0) subdomains.toString() else null)
-            if (suspicious.isNotEmpty()) push("Suspicious", suspicious.joinToString(", "), true)
-            push("security.txt", if (res.o("files").s("security_txt") == "not found") "not found" else "present")
-            push("SSL issues", if (ssl > 0) ssl.toString() else "none")
-        }
-        IndicatorKind.UNKNOWN -> Unit
+        IndicatorKind.DOMAIN, IndicatorKind.UNKNOWN -> Unit
     }
     return IndicatorReport(kind, value, verdict, readFindings(raw), facts)
 }

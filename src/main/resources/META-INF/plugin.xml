@@ -17,7 +17,7 @@ get its known vulnerabilities with exploitation intelligence, and see them in th
       Project view by their worst severity.</li>
   <li>An inspection reporting each advisory on the line that declares the package.</li>
   <li>Quick documentation on any <b>CVE identifier</b>, in any file: CVSS, EPSS, known-exploited status, weaknesses.</li>
-  <li><b>Analyze Selection</b>: look up a selected URL, IP, email, file hash, MAC address or domain.</li>
+  <li><b>Analyze Selection</b>: look up a selected URL, IP, email, file hash or MAC address. A domain opens its page on mlab.sh, where you can start a scan.</li>
   <li>Automatic rescans when a lockfile changes, cached per content so an unchanged file is never re-uploaded.</li>
 </ul>
 <p>Supported lockfiles: Cargo.lock, package-lock.json, npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml,
@@ -32,7 +32,7 @@ bom.xml.</p>
   <li>A scan uploads <b>only the lockfile</b> you scan to vuln.mlab.sh (or your self-hosted endpoint), never your
       source code.</li>
   <li>CVE details send only the CVE identifier. Analyze Selection sends only the selected value, to the mlab
-      platform endpoint for its type. A domain lookup is the one kind that contacts the target.</li>
+      platform endpoint for its type. Nothing it does contacts the indicator; a domain only opens its page on mlab.sh.</li>
   <li>API credentials are kept in the IDE password safe only. No telemetry is collected.</li>
   <li>Scanning and lookups are disabled in untrusted projects.</li>
 </ul>
@@ -94,7 +94,7 @@ colors, inspection, CVE quick documentation, Analyze Selection, and <code>.mlab/
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="sh.mlab.vulnscan.AnalyzeSelection" class="sh.mlab.vulnscan.AnalyzeSelectionAction" icon="/icons/mlab.svg"
-                text="Analyze Selection with mlab" description="Look up the selected URL, IP, email, hash, MAC address or domain">
+                text="Analyze Selection with mlab" description="Look up the selected URL, IP, email, hash or MAC address, or open a domain on mlab.sh">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 

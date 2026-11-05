@@ -3,6 +3,33 @@
 All notable changes to this plugin are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] - 2026-11-05
+
+Indicator lookups follow the current mlab platform API, like the VS Code
+extension 1.4.0. **The built-in domain scan is removed.**
+
+### Removed
+
+- **Domain scanning from the IDE.** Analyze Selection no longer launches, polls
+  or reads a domain scan (`POST /scan/domain`, `/scan/domain/status`,
+  `/scan/domain/results`). A domain scan contacts the target and spends the
+  organisation's scan quota, which a right-click on a string should not do.
+
+### Changed
+
+- **A selected domain opens its page on mlab.sh** (`<platform>/domain/<name>`,
+  following `platformUrl`). The page shows the latest report, or offers to start
+  a scan, which you launch there yourself.
+- **Clearer errors.** A rejected key says it is mistyped, revoked or expired
+  (keys expire after 90 days by default) and where to make a new one, with an
+  action to replace it. A missing permission shows the server's own message,
+  which names it. A spent quota says it refills over a rolling 24 hours.
+
+### Added
+
+- **Quota left**, read from the `X-RateLimit-*` headers on keyed lookups that
+  spend it (IP), shown under the result.
+
 ## [1.2.0] - 2026-10-11
 
 Follows the vuln.mlab.sh scan API changes, like the VS Code extension 1.3.0.

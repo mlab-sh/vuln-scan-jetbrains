@@ -10,11 +10,16 @@ enum class IndicatorKind(val label: String) {
     IP("IP address"), URL("URL"), EMAIL("email address"), HASH("file hash"),
     MAC("MAC address"), DOMAIN("domain"), UNKNOWN("indicator");
 
-    /** A domain is scanned, not looked up: it contacts the target and must be polled. */
-    val isActive get() = this == DOMAIN
-    val isSupported get() = this != UNKNOWN
-    /** Kinds that spend a daily, organisation wide quota. */
-    val costsQuota get() = this == IP || this == DOMAIN
+    /** Looked up in place. All five are passive: they read a database. */
+    val isSupported get() = this != UNKNOWN && this != DOMAIN
+    /**
+     * Never scanned from the IDE: the action opens the page on mlab.sh instead,
+     * where the user starts the scan. A domain scan contacts the target and
+     * spends the organisation's quota.
+     */
+    val opensInBrowser get() = this == DOMAIN
+    /** Kinds whose lookup spends the platform quota (rolling 24 h). */
+    val costsQuota get() = this == IP
 }
 
 /** A selection longer than this is not an indicator; refuse rather than upload it. */
@@ -53,8 +58,8 @@ fun detectKind(value: String): IndicatorKind {
     if (MAC_BARE.matches(v)) return IndicatorKind.MAC
     if (IPV4.matches(v)) return IndicatorKind.IP
     if (':' in v && IPV6.matches(v) && v.split(':').size >= 3) return IndicatorKind.IP
-    // A domain needs a non-numeric last label, or 256.0.0.1 would be sent to a
-    // domain scan when the user selected a broken IP.
+    // A domain needs a non-numeric last label, or 256.0.0.1 would open a domain
+    // page when the user selected a broken IP.
     if (DOMAIN_RE.matches(v) && v.substringAfterLast('.').any { !it.isDigit() }) return IndicatorKind.DOMAIN
     return IndicatorKind.UNKNOWN
 }

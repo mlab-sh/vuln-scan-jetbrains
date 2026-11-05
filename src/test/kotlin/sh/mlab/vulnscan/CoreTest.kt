@@ -4,7 +4,6 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -209,22 +208,62 @@ class IocTest {
 
     @Test fun `routing, web pages and quota`() {
         for (k in IndicatorKind.entries.filter { it.isSupported }) {
-            assertNotEquals(k.name, endpointFor("https://mlab.sh/api/v1", k, "x") != null, k.isActive)
+            assertNotNull(k.name, endpointFor("https://mlab.sh/api/v1", k, "x"))
+            assertFalse(k.name, k.opensInBrowser)
             assertNotNull(webUrlFor("https://mlab.sh", k, "v"))
         }
+        // A domain is never scanned from the IDE: its page on mlab.sh is opened,
+        // which shows the report or offers a scan the user starts there.
+        assertFalse(IndicatorKind.DOMAIN.isSupported)
+        assertTrue(IndicatorKind.DOMAIN.opensInBrowser)
+        assertNull(endpointFor("https://mlab.sh/api/v1", IndicatorKind.DOMAIN, "x"))
+        assertEquals("https://mlab.sh/domain/example.com", webUrlFor("https://mlab.sh", IndicatorKind.DOMAIN, "example.com"))
+        assertEquals("https://mlab.internal:8443/domain/a.test", webUrlFor(originOf("https://mlab.internal:8443/api/v1"), IndicatorKind.DOMAIN, "a.test"))
         assertEquals("https://mlab.sh/api/v1/scan/ip?ip=1.1.1.1", endpointFor("https://mlab.sh/api/v1/", IndicatorKind.IP, "1.1.1.1"))
         assertEquals("https://mlab.sh/url?q=https%3A%2F%2Fexample.com%2Fa%20b", webUrlFor("https://mlab.sh", IndicatorKind.URL, "https://example.com/a b"))
         assertEquals("https://mlab.sh/email/a%2Bb%40example.com", webUrlFor("https://mlab.sh", IndicatorKind.EMAIL, "a+b@example.com"))
         assertEquals("https://mlab.sh/ip/%3A%3A1", webUrlFor("https://mlab.sh/", IndicatorKind.IP, "::1"))
         assertNull(webUrlFor("https://mlab.sh", IndicatorKind.UNKNOWN, "x"))
-        assertEquals(setOf(IndicatorKind.IP, IndicatorKind.DOMAIN), IndicatorKind.entries.filter { it.costsQuota }.toSet())
+        assertEquals(setOf(IndicatorKind.IP), IndicatorKind.entries.filter { it.costsQuota }.toSet())
     }
 
-    @Test fun `domain polling is bounded`() {
-        assertEquals(DomainState.PENDING, readState(json("""{"status":"pending"}""")))
-        assertEquals(DomainState.DONE, readState(json("{}")))
-        assertTrue(pollDelay(1) > pollDelay(0))
-        assertTrue((0 until MAX_POLLS).sumOf { pollDelay(it) } <= 5 * 60 * 1000)
+    @Test fun `refused lookups say what to do`() {
+        val expired = indicatorErrorFor(401, """{"error":"Unauthorized"}""", withKey = true)
+        assertEquals(ScanErrorKind.AUTH, expired.kind)
+        assertTrue(expired.message!!.contains("revoked or expired"))
+        assertTrue(expired.message!!.contains("90 days"))
+        assertFalse(indicatorErrorFor(401, "", withKey = false).message!!.contains("90 days"))
+
+        val scope = "This API key does not have the 'scan.lookup' permission (Lookups)."
+        assertEquals(scope, indicatorErrorFor(403, """{"error":"$scope"}""", withKey = true).message)
+        assertEquals(ScanErrorKind.AUTH, indicatorErrorFor(403, "not json", withKey = true).kind)
+
+        val spent = indicatorErrorFor(429, """{"error":"IP lookup limit reached. Please try again later."}""", withKey = true, retryAfter = "3600")
+        assertEquals(ScanErrorKind.RATE_LIMIT, spent.kind)
+        assertEquals("3600", spent.retryAfter)
+        assertTrue(spent.message!!.startsWith("IP lookup limit reached"))
+        assertTrue(spent.message!!.contains("rolling 24 hours"))
+        assertFalse(spent.message!!.contains("raises it"))
+        assertTrue(indicatorErrorFor(429, "", withKey = false).message!!.contains("platform key raises it"))
+    }
+
+    @Test fun `quota is read from the X-RateLimit headers`() {
+        val h = mapOf("x-ratelimit-limit" to "500", "x-ratelimit-remaining" to "497", "x-ratelimit-resource" to "ip", "x-ratelimit-window" to "86400")
+        val q = readQuota(h)
+        assertEquals(Quota(500, 497, "ip", 86400), q)
+        assertEquals("497 of 500 ip lookups left per rolling 24 h", quotaLine(q!!))
+        assertNull(readQuota(emptyMap()))
+        assertNull(readQuota(mapOf("x-ratelimit-limit" to "x", "x-ratelimit-remaining" to "1")))
+
+        val keyed = reportFrom(IndicatorKind.IP, "8.8.8.8", HttpResponse(200, """{"org":"Google"}""", null, h), withKey = true)
+        assertEquals(497, keyed.quota?.remaining)
+        assertNull(reportFrom(IndicatorKind.IP, "8.8.8.8", HttpResponse(200, "{}", null, h), withKey = false).quota)
+        try {
+            reportFrom(IndicatorKind.HASH, "x", HttpResponse(401, """{"error":"Unauthorized"}""", null), withKey = true)
+            throw AssertionError("a 401 must throw")
+        } catch (e: IndicatorException) {
+            assertEquals(ScanErrorKind.AUTH, e.kind)
+        }
     }
 
     @Test fun `responses normalise per kind`() {
@@ -240,8 +279,6 @@ class IocTest {
         assertEquals(Tone.NEUTRAL, ip.verdict?.tone)
         assertTrue(ip.facts.any { it.label == "Location" && it.value == "Ashburn, Virginia, United States" })
         assertEquals(Tone.WARN, summarizeIndicator(IndicatorKind.IP, "x", json("""{"proxy":true}""")).verdict?.tone)
-        assertTrue(isCompleted(json("""{"status":"completed","results":{}}""")))
-        assertFalse(isCompleted(json("""{"status":"completed","results":null}""")))
     }
 }
 

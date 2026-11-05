@@ -273,7 +273,7 @@ fun indicatorHtml(r: IndicatorReport, opts: RenderOpts): String {
         """<header class="top"><span class="kind">${esc(r.kind.label)}</span>$headline</header>
         <code class="val big">${esc(truncate(r.value, 200))}</code>
         $verdict $findings $facts $link
-        <footer class="muted small">Looked up on the mlab platform. Only the value above was sent.</footer>""",
+        <footer class="muted small">Looked up on the mlab platform. Only the value above was sent.${r.quota?.let { " " + esc(quotaLine(it)) + "." } ?: ""}</footer>""",
         opts, INDICATOR_STYLE,
     )
 }

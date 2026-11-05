@@ -66,7 +66,7 @@ class MlabConfigurable(private val project: Project) : BoundConfigurable("mlab")
                 button("Remove") { clear(Secret.PLATFORM_KEY) }
             }
             row { browserLink("Create a key in your mlab.sh account", "https://mlab.sh/account/subscription") }
-            row { comment("A separate credential from the scan token: it is for Analyze Selection lookups on the mlab platform, which also work without it at a reduced daily quota.") }
+            row { comment("A separate credential from the scan token: it is for Analyze Selection lookups on the mlab platform, which also work without it at a reduced quota.") }
         }
         group("Behaviour") {
             row {
@@ -77,7 +77,7 @@ class MlabConfigurable(private val project: Project) : BoundConfigurable("mlab")
             row {
                 checkBox("Offer Analyze Selection in the editor context menu").bindSelected(state::analyzeSelection)
                     .comment(overridden(MlabConfig.analyzeSelection(project).layer)
-                        ?: "Look up a selected URL, IP, email, file hash, MAC address or domain. Only the selected value is sent.")
+                        ?: "Look up a selected URL, IP, email, file hash or MAC address; a domain opens its page on mlab.sh. Only the selected value is sent.")
             }
             row {
                 checkBox("Show CVE details on hover").bindSelected(state::cveHover)
